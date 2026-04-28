@@ -1911,3 +1911,46 @@ Then you've built the skeleton of a real matching engine. Phase 2 (sequencing, r
 ---
 
 *Phase 1 complete. Phase 2: sequencer, FIX/WebSocket gateway, pre-trade risk, state persistence.*
+
+graph TB
+    %% Physical Hardware Layer
+    subgraph CPU_Chip ["CPU Silicon Die"]
+        direction TB
+        L3["L3 Cache (Shared Library - ~40-60 cycles)"]
+        
+        subgraph Core_0 ["CPU Core 0 (Isolated)"]
+            direction TB
+            L2_0["L2 Cache (~12 cycles)"]
+            L1_0["L1 Cache (~4 cycles)"]
+            ALU_0["ALU: Gateway Logic"]
+        end
+        
+        subgraph Core_1 ["CPU Core 1 (Isolated)"]
+            direction TB
+            L2_1["L2 Cache (~12 cycles)"]
+            L1_1["L1 Cache (~4 cycles)"]
+            ALU_1["ALU: Matching Engine"]
+        end
+    end
+
+    %% Memory Layer
+    subgraph RAM ["Main Memory (RAM - ~200+ cycles)"]
+        direction LR
+        subgraph Process_Space ["Matching Engine Process"]
+            Heap["Shared Heap Memory<br/>(Order Book, Ring Buffer)"]
+            Stack0["Stack (Thread 0)"]
+            Stack1["Stack (Thread 1)"]
+        end
+    end
+
+    %% Logical Connections
+    ALU_0 --- L1_0 --- L2_0 --- L3
+    ALU_1 --- L1_1 --- L2_1 --- L3
+    L3 <== "High Speed Interconnect" ==> Heap
+    
+    %% Thread Pinning (Affinity)
+    Gateway_Thread((Thread 0)) -. "Pinned to" .-> Core_0
+    Matcher_Thread((Thread 1)) -. "Pinned to" .-> Core_1
+
+    %% Data Flow
+    Heap -. "LMAX Disruptor Pattern" .-> Stack1

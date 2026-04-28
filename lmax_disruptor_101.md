@@ -1912,45 +1912,194 @@ Then you've built the skeleton of a real matching engine. Phase 2 (sequencing, r
 
 *Phase 1 complete. Phase 2: sequencer, FIX/WebSocket gateway, pre-trade risk, state persistence.*
 
-graph TB
-    %% Physical Hardware Layer
-    subgraph CPU_Chip ["CPU Silicon Die"]
+
+
+
+# The Whole Picture: CPU, RAM, Stack, Heap, Threads & Processes
+
+Four diagrams, zoomed in progressively from hardware → OS → language runtime → your actual application (a CEX matching engine).
+
+---
+
+## 1. Memory Hierarchy — Latency *is* Physical Distance
+
+The further data sits from the CPU core that wants it, the longer it takes to fetch. Each step down is roughly **10× slower**.
+
+```mermaid
+flowchart TB
+    subgraph Chip["🖥️ CPU CHIP — one piece of silicon"]
         direction TB
-        L3["L3 Cache (Shared Library - ~40-60 cycles)"]
-        
-        subgraph Core_0 ["CPU Core 0 (Isolated)"]
+        subgraph Core1["⚙️ Core 1"]
             direction TB
-            L2_0["L2 Cache (~12 cycles)"]
-            L1_0["L1 Cache (~4 cycles)"]
-            ALU_0["ALU: Gateway Logic"]
+            R1["Registers<br/>~0.3 ns · bytes"]
+            L1a["L1 Cache<br/>~1 ns · 32 KB"]
+            L2a["L2 Cache<br/>~3 ns · 256 KB"]
+            R1 --- L1a
+            L1a --- L2a
         end
-        
-        subgraph Core_1 ["CPU Core 1 (Isolated)"]
+        subgraph Core2["⚙️ Core 2"]
             direction TB
-            L2_1["L2 Cache (~12 cycles)"]
-            L1_1["L1 Cache (~4 cycles)"]
-            ALU_1["ALU: Matching Engine"]
+            R2["Registers<br/>~0.3 ns · bytes"]
+            L1b["L1 Cache<br/>~1 ns · 32 KB"]
+            L2b["L2 Cache<br/>~3 ns · 256 KB"]
+            R2 --- L1b
+            L1b --- L2b
+        end
+        L3["L3 Cache — SHARED across cores<br/>~10 ns · 8–32 MB"]
+        L2a --- L3
+        L2b --- L3
+    end
+
+    RAM["🧠 RAM / Main Memory<br/>~100 ns · GBs<br/>off-chip, on motherboard"]
+    SSD["💾 SSD<br/>~100,000 ns = 100 μs"]
+    HDD["💿 HDD<br/>~10,000,000 ns = 10 ms"]
+
+    L3 --- RAM
+    RAM --- SSD
+    SSD --- HDD
+```
+
+**Key insight:** L1/L2 are *per-core* (private). L3 is *per-chip* (shared). RAM is *per-machine*. This is why pinning a thread to a core matters — its working set stays warm in *that core's* L1/L2.
+
+---
+
+## 2. Process Memory Layout — One Virtual Address Space
+
+When the OS launches your program, it gives the **process** its own virtual address space, carved into regions:
+
+```mermaid
+flowchart TB
+    subgraph Process["🔹 ONE PROCESS — its own virtual address space"]
+        direction TB
+        High["HIGH ADDRESSES — e.g. 0xFFFFFFFF"]
+        Stack["📚 STACK<br/>function call frames, local variables, return addresses<br/>grows DOWN ↓ · fixed size · LIFO · very fast"]
+        Empty["··· large free virtual region ···"]
+        Heap["🌊 HEAP<br/>malloc / new / Box / make<br/>grows UP ↑ · flexible size · slower · you (or GC) manage it"]
+        BSS["📊 BSS — uninitialised globals & statics"]
+        Data["📊 Data — initialised globals & statics"]
+        Text["📜 Text / Code — your compiled instructions (read-only)"]
+        Low["LOW ADDRESSES — 0x00000000"]
+
+        High --- Stack
+        Stack --- Empty
+        Empty --- Heap
+        Heap --- BSS
+        BSS --- Data
+        Data --- Text
+        Text --- Low
+    end
+```
+
+**Stack vs Heap quick contrast:**
+- **Stack** — you don't ask for it; the compiler bumps a pointer when a function is called and decrements it when it returns. Free.
+- **Heap** — you explicitly ask the allocator for a block; it has to find one, track it, and you (or a GC) have to give it back. Costs cycles + risks fragmentation.
+
+---
+
+## 3. Threads Inside a Process — What's Shared, What's Private
+
+A **process** is the container. **Threads** are the things that actually run on CPU cores. They share most of the process's address space — but each gets its own stack and register state.
+
+```mermaid
+flowchart TB
+    subgraph Process["🔹 ONE PROCESS"]
+        direction TB
+        subgraph Shared["✅ SHARED across all threads in this process"]
+            Code["📜 Code / Text"]
+            Data["📊 Globals & static Data"]
+            Heap["🌊 HEAP — one heap, all threads see same objects<br/>⚠️ concurrent access needs synchronisation"]
+            FD["📁 File descriptors, sockets, mmaps"]
+        end
+
+        subgraph T1["🧵 Thread 1"]
+            S1["📚 Own Stack"]
+            R1["Own Registers + PC"]
+        end
+        subgraph T2["🧵 Thread 2"]
+            S2["📚 Own Stack"]
+            R2["Own Registers + PC"]
+        end
+        subgraph T3["🧵 Thread 3"]
+            S3["📚 Own Stack"]
+            R3["Own Registers + PC"]
+        end
+
+        T1 -.reads/writes.-> Heap
+        T2 -.reads/writes.-> Heap
+        T3 -.reads/writes.-> Heap
+    end
+```
+
+**Why this matters for performance:**
+- A pointer in Thread 1's stack pointing into the heap is reachable by Thread 2 — that's how shared-memory concurrency works (and where data races come from).
+- A "context switch" = OS saves the registers + PC of the running thread, loads another thread's. Cheap *between threads of the same process* (same address space). Expensive *between processes* (TLB flush, page-table swap).
+
+---
+
+## 4. Putting It All Together — The CEX Order Lifecycle
+
+Now the picture from your Gemini answer, drawn explicitly. Three threads pinned to three cores, communicating through ring buffers that sit in shared L3 cache. No locks — just atomic sequence numbers riding the cache-coherence wires between cores.
+
+```mermaid
+flowchart LR
+    NIC_IN["📡 NIC IN<br/>raw network packet"]
+
+    subgraph Chip["🖥️ CPU CHIP"]
+        direction TB
+        subgraph C1["⚙️ Core 1 — pinned"]
+            IT["🧵 Input Thread<br/>while(true) spin on NIC"]
+        end
+        subgraph C2["⚙️ Core 2 — pinned"]
+            ME["🧵 Matching Engine<br/>while(true) spin on seq#"]
+            OB["📒 Order Book top-of-book<br/>hot in this core's L1/L2"]
+            ME --- OB
+        end
+        subgraph C3["⚙️ Core 3 — pinned"]
+            OT["🧵 Output Thread<br/>while(true) spin on seq#"]
+        end
+
+        subgraph L3Cache["L3 Cache — shared — Ring Buffers live here"]
+            RB1[("📥 Ring Buffer 1<br/>incoming Orders")]
+            RB2[("📤 Ring Buffer 2<br/>Execution Reports")]
         end
     end
 
-    %% Memory Layer
-    subgraph RAM ["Main Memory (RAM - ~200+ cycles)"]
-        direction LR
-        subgraph Process_Space ["Matching Engine Process"]
-            Heap["Shared Heap Memory<br/>(Order Book, Ring Buffer)"]
-            Stack0["Stack (Thread 0)"]
-            Stack1["Stack (Thread 1)"]
-        end
-    end
+    NIC_OUT["📡 NIC OUT<br/>reply packet"]
 
-    %% Logical Connections
-    ALU_0 --- L1_0 --- L2_0 --- L3
-    ALU_1 --- L1_1 --- L2_1 --- L3
-    L3 <== "High Speed Interconnect" ==> Heap
-    
-    %% Thread Pinning (Affinity)
-    Gateway_Thread((Thread 0)) -. "Pinned to" .-> Core_0
-    Matcher_Thread((Thread 1)) -. "Pinned to" .-> Core_1
+    NIC_IN -->|"1 · raw bytes"| IT
+    IT -->|"2 · parse Order, publish"| RB1
+    RB1 -.->|"3 · atomic seq# update<br/>cache-coherence wires"| ME
+    ME -->|"4 · match against book"| ME
+    ME -->|"5 · write Exec Report"| RB2
+    RB2 -.->|"6 · atomic seq# update"| OT
+    OT -->|"7 · serialise + send"| NIC_OUT
+```
 
-    %% Data Flow
-    Heap -. "LMAX Disruptor Pattern" .-> Stack1
+**Why the latency numbers from Diagram 1 dictate this design:**
+- The Order Book sits in **Core 2's L1/L2** (~1–3 ns reads) — that's only possible because *only Core 2* writes to it. No other core invalidates those cache lines.
+- Ring Buffers sit in **L3** (~10 ns) — slow enough that producer and consumer can both touch them, fast enough to not bottleneck.
+- A traditional lock-based queue would force the cache line for the lock variable to bounce between Core 1 and Core 2 on every operation — each bounce = ~10 ns minimum. The Disruptor avoids this by having only the producer write the sequence number.
+- All three threads `while(true)` spin instead of sleeping because waking from a sleep is microseconds, not nanoseconds.
+
+---
+
+## Quick Reference Table
+
+| Concept | Lives in | Per-thread or shared? |
+|---|---|---|
+| Registers | CPU core | per-thread (saved/restored on context switch) |
+| L1 / L2 cache | CPU core | physically per-core; logically shared by threads pinned there |
+| L3 cache | CPU chip | shared by all cores on the chip |
+| RAM | motherboard | shared by every process on the machine |
+| **Stack** | RAM (cached aggressively) | **one per thread** |
+| **Heap** | RAM (cached aggressively) | **one per process — shared by all its threads** |
+| Code / Text | RAM | shared by all threads of the process |
+| Globals / Data | RAM | shared by all threads of the process |
+| File descriptors | kernel space | shared by all threads of the process |
+| Virtual address space | kernel page tables | one per process (threads inherit it) |
+
+---
+
+## The Mental Model in One Sentence
+
+> **A process is an address space; threads are the workers running inside it; the stack is the worker's private notebook; the heap is the shared whiteboard; and the CPU caches are how fast the workers can actually read/write any of it — which is why you pin threads to cores and pass messages through ring buffers instead of locks.**

@@ -6,6 +6,12 @@
 
 ---
 
+## Prerequisites
+
+You should have roughly a year of programming experience in any language. **Zero** Rust knowledge is required.
+This course teaches in prose, then tests you with deliberately harsh drills.
+Write and run your drill answers in the `rust/*_answers.md` files in `rust/`.
+
 ## Before You Start: What Rust Actually Is
 
 Rust is a **systems programming language**, like C and C++. "Systems programming" means writing code that runs close to the hardware: operating systems, browsers, databases, game engines, embedded firmware, network protocol implementations. It also means writing application code that needs to be very fast and very predictable.

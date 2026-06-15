@@ -61,3 +61,8 @@ A three-phase Rust course, same teaching style. Do them in order.
 Naming: a `_101 / _102 / _103` suffix is the phase/difficulty within one topic,
 not a separate topic. Every course is structured as gentle explanation first,
 then drills that are intentionally much harder than the prose.
+
+## Contributing
+
+This is a personal study repo, so contributions are handled through the automated agency pipeline.
+Issues and pull requests are managed there, and changes flow through pull requests.

@@ -5,6 +5,16 @@ harsh drills. Languages (Rust, Go), system design, and a build-it-yourself tour
 of how a crypto exchange (CEX) matching engine actually works. Plus one working
 Go code project.
 
+## How to use this repo
+
+- New to the material? Start with `go/go_101.md` if you want a language first,
+  or `general/system_design_101.md` if you want the big picture; then work the
+  `cex/` phases in order.
+- Each course is the same shape: gentle teaching prose first, then drills that
+  are deliberately much harsher than the prose.
+- `go/go-matching-engine/` is the one runnable code project — clone, `go run`,
+  and read its own `README.md`.
+
 ---
 
 ## `cex/` — CEX Matching Engine course (Go)

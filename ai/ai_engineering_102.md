@@ -71,12 +71,12 @@ The crucial thing beginners get wrong: **the model does not run your code, touch
 5. The model continues, now able to use that result — to answer, or to call another tool.
 
 ```
-   model: "I need to call get_order(order_id='A123')"   ← just text/structured output
-     │
-     ▼   YOUR CODE runs the real query (the model never touches the DB)
+   model: "I need to call get_order(order_id='A123')"   < just text/structured output
+     |
+     v   YOUR CODE runs the real query (the model never touches the DB)
    tool result: {"status":"shipped","eta":"Friday"}
-     │
-     ▼   you feed it back
+     |
+     v   you feed it back
    model: "Your order A123 shipped and arrives Friday."
 ```
 
@@ -87,22 +87,22 @@ Engrave this: **the model proposes; your code disposes.** Every actual side effe
 One tool call is useful. The power comes from **looping**: let the model see a tool result and decide what to do next, repeatedly, until the task is done. The canonical pattern is **ReAct** (Reason + Act):
 
 ```
-   ┌─────────────────────────────────────────────┐
-   │                                             │
-   ▼                                             │
- OBSERVE   take in the goal + latest results     │
-   │                                             │
-   ▼                                             │
- REASON    model decides: am I done, or what     │
-   │        tool do I call next, with what args? │
-   │                                             │
-   ▼                                             │
-  ACT       YOUR CODE runs the chosen tool ──────┘
-   │         feed result back as a new OBSERVE
-   ▼
+   +---------------------------------------------+
+   |                                             |
+   v                                             |
+ OBSERVE   take in the goal + latest results     |
+   |                                             |
+   v                                             |
+ REASON    model decides: am I done, or what     |
+   |        tool do I call next, with what args? |
+   |                                             |
+   v                                             |
+  ACT       YOUR CODE runs the chosen tool ------+
+   |         feed result back as a new OBSERVE
+   v
  (loop until model says "done" OR a budget is hit)
-   │
-   ▼
+   |
+   v
  FINAL ANSWER
 ```
 
@@ -220,13 +220,13 @@ So the defining skill of production AI engineering is **context engineering**: d
 Every token in the window competes for two scarce things: **budget** (cost and the hard size limit) and **attention** (the model's ability to actually use it — degraded in the middle, degraded by noise). What's competing for that space in a Phase 2 system:
 
 ```
-  ┌──────────────────────── CONTEXT WINDOW (finite) ────────────────────────┐
-  │ system prompt + tool definitions   (fixed overhead, every call)         │
-  │ conversation history               (grows every turn)                   │
-  │ retrieved chunks                   (grows with each retrieval)          │
-  │ tool results                       (can be huge — a 10k-row query!)     │
-  │ the model's current output         (also counts against the budget)    │
-  └─────────────────────────────────────────────────────────────────────────┘
+  +------------------------ CONTEXT WINDOW (finite) ------------------------+
+  | system prompt + tool definitions   (fixed overhead, every call)         |
+  | conversation history               (grows every turn)                   |
+  | retrieved chunks                   (grows with each retrieval)          |
+  | tool results                       (can be huge - a 10k-row query!)     |
+  | the model's current output         (also counts against the budget)    |
+  +-------------------------------------------------------------------------+
 ```
 
 The mindset shift: **you are not trying to fill the window; you are trying to keep it small and high-signal.** More context is not more better. The goal at every step is the *minimal sufficient* context — exactly what this step needs, nothing else. A lean, relevant 8k-token context routinely beats a bloated, padded 200k-token one on both quality and cost.
@@ -341,13 +341,13 @@ Phase 1 flagged it: embeddings are great at *meaning/paraphrase* and weak at *ex
 First-pass retrieval (vector or hybrid) is tuned for *recall* — cast a wide net, grab maybe the top 50 candidates fast — but its ordering is rough. So you add a second stage: a **reranker** (typically a cross-encoder) that looks at the query and each candidate *together* and scores true relevance much more accurately than the first-pass similarity did. You then keep the top few reranked results for the prompt.
 
 ```
-  query ──► first-pass retrieval ──► ~50 candidates (high recall, rough order)
-                                          │
-                                          ▼
+  query --> first-pass retrieval --> ~50 candidates (high recall, rough order)
+                                          |
+                                          v
                                       RERANKER (query + candidate scored jointly)
-                                          │
-                                          ▼
-                                   top 3–5 truly-relevant chunks ──► prompt
+                                          |
+                                          v
+                                   top 3-5 truly-relevant chunks --> prompt
 ```
 
 This two-stage "retrieve broad, rerank precise" pattern fixes a huge fraction of "the right doc was in the index but not in the context" failures — the answer was in your top 50 but not your top 5, and the reranker promotes it. The cost is one extra model call per query; the quality gain is usually worth it.
@@ -376,10 +376,10 @@ Retrieval gets the right text in; **grounding** makes the model actually *use it
 The lesson that turns RAG from alchemy into engineering: **a RAG system has two failure surfaces, and you must evaluate them separately**, or you'll "fix" the wrong one for weeks.
 
 ```
-        ┌─────────────┐         ┌─────────────┐
-  query │  RETRIEVAL  │ chunks  │ GENERATION  │  answer
-  ─────►│   stage     ├────────►│   stage     ├────────►
-        └─────────────┘         └─────────────┘
+        +-------------+         +-------------+
+  query |  RETRIEVAL  | chunks  | GENERATION  |  answer
+  ----->|   stage     +-------->|   stage     +-------->
+        +-------------+         +-------------+
         eval THIS separately    eval THIS separately
         - recall@k: was the      - faithfulness: grounded
           right chunk retrieved?   in the chunks?
@@ -602,50 +602,53 @@ If you can do those four things, you can ship and run a real AI system — not j
 
 Zoom all the way out. Here is everything from both phases as one system. Notice how small "the model" is, and how much of the system exists to **extract its capability while containing its untrustworthiness.**
 
+```text
+          USER REQUEST
+              |
+              v
+  [ INPUT GUARDRAILS  -  Lesson 4.6 ]
+      validate; filter; injection checks; rate-limit
+              |
+              v
+  +===== ORCHESTRATOR / AGENT LOOP  (Lesson 1) =============+
+      your code; runs the ReAct loop;
+      enforces budgets (max steps / tokens / cost / time)
+
+      knowledge base
+          |
+          v
+      [ RETRIEVAL  -  Lesson 3 ]
+          hybrid search -> rerank -> grounded chunks + cites
+          |
+          v
+      [ CONTEXT MANAGER  -  Lesson 2 ]
+          minimal sufficient context; short-term window +
+          long-term store; summarize / evict; prompt caching
+          |   builds the prompt
+          v
+      [ THE MODEL  -  Phase 1 ]  rented; stateless; UNTRUSTED
+          |                          ^
+          | proposes a tool call     | result feeds back in
+          v                          |
+      [ TOOLS  -  Lesson 1 ] --------+
+          least-privilege; validated; idempotent;
+          YOUR code executes (model never does) -> real actions
+  +========================================================+
+              |
+              v
+  [ OUTPUT GUARDRAILS  -  Lesson 4.6 ]
+      schema validation; policy and PII checks;
+      human-in-the-loop for irreversible actions
+              |
+              v
+          RESPONSE TO USER
+
+  Wraps the whole loop -> OBSERVABILITY + EVALS
+  (Lesson 4.5 and Phase 1 Lesson 4): trace every request;
+  cost / latency / quality; mine failures into eval cases.
 ```
-   USER
-    │  request
-    ▼
- ┌────────────────────────── INPUT GUARDRAILS (L4.6) ──────────────────────────┐
- │  validate, filter, injection checks, rate-limit                            │
- └──────────────────────────────────┬──────────────────────────────────────────┘
-                                     ▼
- ┌─────────────────────────── ORCHESTRATOR / AGENT LOOP (L1) ───────────────────┐
- │  runs the ReAct loop · enforces budgets (steps/tokens/cost/time) · YOUR code │
- │                                                                              │
- │   ┌──────────────── CONTEXT MANAGER (L2) ────────────────┐                   │
- │   │ minimal sufficient context · short-term window +     │                   │
- │   │ long-term store · summarize/evict · prompt caching    │                   │
- │   └───────────────────────┬───────────────────────────────┘                  │
- │                           │ builds the prompt                                │
- │   ┌──────────── RETRIEVAL (L3) ───────────┐                                  │
- │   │ hybrid search → rerank → grounded      │  ←── knowledge (your data)       │
- │   │ chunks + citations                     │                                  │
- │   └───────────────────────┬────────────────┘                                 │
- │                           ▼                                                  │
- │                    ┌──────────────┐    proposes a tool call or an answer     │
- │                    │  THE MODEL   │    (rented · stateless · untrusted ·     │
- │                    │  (Phase 1)   │     next-token predictor)                │
- │                    └──────┬───────┘                                          │
- │                           │ tool call                                        │
- │   ┌──────────────── TOOLS (L1) ────────────────┐                             │
- │   │ least-privilege · validated · idempotent ·  │ ──► real actions / data     │
- │   │ YOUR code executes; model never does        │     (DB, APIs, the world)   │
- │   └───────────────────────┬─────────────────────┘                            │
- │                           │ result feeds back into the loop ↑                │
- └──────────────────────────────────┬───────────────────────────────────────────┘
-                                     ▼
- ┌────────────────────────── OUTPUT GUARDRAILS (L4.6) ─────────────────────────┐
- │  schema validation · policy/PII checks · human-in-the-loop for irreversible │
- └──────────────────────────────────┬──────────────────────────────────────────┘
-                                     ▼
-   RESPONSE ──► USER
-                                     │
- ┌──────── OBSERVABILITY + EVALS (L4.5, Phase 1 L4) ── wraps everything ────────┐
- │  trace every request · cost/latency/quality · mine failures into eval set ── │
- │  feeds the eval-driven loop that improves the whole system over time         │
- └──────────────────────────────────────────────────────────────────────────────┘
-```
+
+*Notice how small "the model" is, and how much of the system exists to extract its capability while containing its untrustworthiness.*
 
 ## Quick Reference Table
 

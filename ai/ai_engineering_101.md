@@ -322,13 +322,13 @@ Give me the name and total as JSON.
 
 …and the model helpfully replies:
 
-```
+````
 Sure! Here's the JSON you asked for:
 ```json
 {"name": "Hinson", "total": 42}
 ```
 Let me know if you need anything else!
-```
+````
 
 Your `JSON.parse()` just choked on "Sure! Here's…". Rules for structured output:
 

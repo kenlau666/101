@@ -814,44 +814,30 @@ If you can do those four things, you've got the foundations of a real AI enginee
 
 Zoom out. Here is everything from this phase as a single request's journey — from a user's question to a logged, evaluated answer. **Almost every box is code you write. The model is one box in the middle.**
 
+```mermaid
+flowchart TB
+    User([User question])
+    Answer([Answer to user])
+
+    subgraph App["YOUR APPLICATION — you write almost all of this"]
+        direction TB
+        Retrieve["RETRIEVE — Lesson 3<br/>embed the question, search the vector DB,<br/>get top-k grounding chunks<br/>(your knowledge, not the model's)"]
+        Build["BUILD CONTEXT — Lessons 2 and 1.4<br/>system rules + few-shot + retrieved chunks<br/>+ history + question<br/>(curated to the token budget; relevance over volume)"]
+        Model["THE MODEL — Lesson 1<br/>rented · black-box · stateless<br/>next-token prediction, sampled at your temperature"]
+        Parse["PARSE and VALIDATE — Lesson 2.4<br/>validate against schema · retry if malformed<br/>· never trust raw output"]
+        Eval["EVAL and LOG — Lesson 4<br/>good? grounded? right format? cost and latency?<br/>log the whole trace; failures become eval cases"]
+
+        Retrieve -->|"context"| Build
+        Build -->|"tokens in"| Model
+        Model -->|"tokens out"| Parse
+        Parse --> Eval
+    end
+
+    User --> Retrieve
+    Eval --> Answer
 ```
-                          YOUR APPLICATION
-  ┌─────────────────────────────────────────────────────────────┐
-  │                                                             │
-  │  user question                                              │
-  │      │                                                      │
-  │      ▼                                                      │
-  │  ┌──────────────────┐   embed the question, search the     │
-  │  │  RETRIEVE (L3)   │   vector DB, get top-k grounding      │
-  │  └────────┬─────────┘   chunks  (your knowledge, not the    │
-  │           │             model's)                            │
-  │           ▼                                                 │
-  │  ┌──────────────────┐   system rules + few-shot examples    │
-  │  │  BUILD CONTEXT   │   + retrieved chunks + history +      │
-  │  │  (L2, L1.4)      │   the question — curated to fit the   │
-  │  └────────┬─────────┘   token budget, relevance over volume │
-  │           │                                                 │
-  │           ▼                                                 │
-  │        [tokens] ──────────────►┌───────────────────┐        │
-  │                                │   THE MODEL (L1)  │        │
-  │        next-token prediction,  │  rented, black-box,│       │
-  │        sampled at your temp    │  stateless, per-tok│       │
-  │                                └─────────┬─────────┘        │
-  │           ◄────────────────[tokens]──────┘                  │
-  │           │                                                 │
-  │           ▼                                                 │
-  │  ┌──────────────────┐   parse + validate against schema;    │
-  │  │  PARSE / VALIDATE│   retry if malformed; never trust     │
-  │  │  (L2.4)          │   raw output                          │
-  │  └────────┬─────────┘                                       │
-  │           ▼                                                 │
-  │  ┌──────────────────┐   was it good? grounded? right        │
-  │  │  EVAL / LOG (L4) │   format? cost & latency? log the     │
-  │  └────────┬─────────┘   whole trace; failures → eval set    │
-  │           ▼                                                 │
-  │     answer to user                                          │
-  └─────────────────────────────────────────────────────────────┘
-```
+
+*Almost every box is code you write. The model is one box in the middle — rented, stateless, untrusted.*
 
 ## Quick Reference Table
 

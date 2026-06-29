@@ -100,8 +100,8 @@ The model does not read words or characters. It reads **tokens** — chunks of t
 Rough rules for English:
 
 ```
-~1 token   ≈ ¾ of a word
-~1,000 tokens ≈ 750 words ≈ 1.5 pages
+~1 token   ~ 3/4 of a word
+~1,000 tokens ~ 750 words ~ 1.5 pages
 ```
 
 But it's lumpy. Common words are one token (`" the"`, `" cat"`). Rare or compound words split (`"tokenization"` → `"token" + "ization"`). Whitespace and capitalization matter (`"cat"`, `" cat"`, and `"Cat"` can be different tokens). Numbers, code, and especially **non-English text** tokenize much worse — a sentence in English might be 10 tokens and the same sentence in Thai or Chinese 40, which means non-English users pay more and hit context limits sooner.
@@ -481,14 +481,14 @@ RAG has two phases. **Ingestion** happens once (or whenever your documents chang
 
 ```
 documents
-   │  1. CHUNK   split each doc into passages (3.5)
-   ▼
+   |  1. CHUNK   split each doc into passages (3.5)
+   v
 chunks
-   │  2. EMBED   run each chunk through the embedding model
-   ▼
+   |  2. EMBED   run each chunk through the embedding model
+   v
 vectors
-   │  3. STORE   put (vector, chunk text, metadata) in a vector DB
-   ▼
+   |  3. STORE   put (vector, chunk text, metadata) in a vector DB
+   v
 vector database
 ```
 
@@ -496,17 +496,17 @@ vector database
 
 ```
 user question
-   │  1. EMBED     embed the question with the same model
-   ▼
+   |  1. EMBED     embed the question with the same model
+   v
 query vector
-   │  2. SEARCH    find top-k nearest chunks in the vector DB
-   ▼
+   |  2. SEARCH    find top-k nearest chunks in the vector DB
+   v
 top-k chunks
-   │  3. STUFF     build a prompt: [instructions] + [chunks] + [question]
-   ▼
+   |  3. STUFF     build a prompt: [instructions] + [chunks] + [question]
+   v
 prompt
-   │  4. GENERATE  ask the model to answer USING ONLY these chunks
-   ▼
+   |  4. GENERATE  ask the model to answer USING ONLY these chunks
+   v
 grounded answer  (ideally with citations to the chunks)
 ```
 
@@ -547,7 +547,7 @@ Three different tools, constantly confused. Choose by *what kind of gap* you're 
 
 ```
 You want the model to...                      Use...
-──────────────────────────────────────────────────────────────
+--------------------------------------------------------------
 Know facts it wasn't trained on, or that      RAG (retrieval)
  change often (your docs, policies, data)
 
@@ -687,13 +687,13 @@ Put it together into a loop that should feel like test-driven development:
 
 ```
 1. Build a golden dataset (start small; grow it from real failures).
-2. Run your current system against it → record quality, cost, latency.
+2. Run your current system against it > record quality, cost, latency.
    This is your BASELINE.
 3. Make ONE change (new prompt / model / chunking / k / temperature).
 4. Re-run the SAME eval set.
 5. Compare to baseline. Better on the metrics that matter? Keep it.
    Worse or mixed? Revert or dig in. Never ship on a hunch.
-6. Every new production failure → add it as a permanent eval case.
+6. Every new production failure > add it as a permanent eval case.
    (Go to 2.)
 ```
 
@@ -814,27 +814,38 @@ If you can do those four things, you've got the foundations of a real AI enginee
 
 Zoom out. Here is everything from this phase as a single request's journey — from a user's question to a logged, evaluated answer. **Almost every box is code you write. The model is one box in the middle.**
 
-```mermaid
-flowchart TB
-    User([User question])
-    Answer([Answer to user])
-
-    subgraph App["YOUR APPLICATION — you write almost all of this"]
-        direction TB
-        Retrieve["RETRIEVE — Lesson 3<br/>embed the question, search the vector DB,<br/>get top-k grounding chunks<br/>(your knowledge, not the model's)"]
-        Build["BUILD CONTEXT — Lessons 2 and 1.4<br/>system rules + few-shot + retrieved chunks<br/>+ history + question<br/>(curated to the token budget; relevance over volume)"]
-        Model["THE MODEL — Lesson 1<br/>rented · black-box · stateless<br/>next-token prediction, sampled at your temperature"]
-        Parse["PARSE and VALIDATE — Lesson 2.4<br/>validate against schema · retry if malformed<br/>· never trust raw output"]
-        Eval["EVAL and LOG — Lesson 4<br/>good? grounded? right format? cost and latency?<br/>log the whole trace; failures become eval cases"]
-
-        Retrieve -->|"context"| Build
-        Build -->|"tokens in"| Model
-        Model -->|"tokens out"| Parse
-        Parse --> Eval
-    end
-
-    User --> Retrieve
-    Eval --> Answer
+```text
+          USER QUESTION
+              |
+              v
+  [ RETRIEVE  -  Lesson 3 ]
+      embed the question, search the vector DB,
+      get the top-k grounding chunks
+      (your knowledge, not the model's)
+              |
+              v
+  [ BUILD CONTEXT  -  Lessons 2 and 1.4 ]
+      system rules + few-shot examples + retrieved
+      chunks + history + the question
+      curated to the token budget; relevance over volume
+              |   tokens in
+              v
+  [ THE MODEL  -  Lesson 1 ]
+      rented . black-box . stateless
+      next-token prediction, sampled at your temperature
+              |   tokens out
+              v
+  [ PARSE / VALIDATE  -  Lesson 2.4 ]
+      validate against the schema; retry if malformed;
+      never trust the raw output
+              |
+              v
+  [ EVAL / LOG  -  Lesson 4 ]
+      good? grounded? right format? cost and latency?
+      log the whole trace; failures become eval cases
+              |
+              v
+          ANSWER TO USER
 ```
 
 *Almost every box is code you write. The model is one box in the middle — rented, stateless, untrusted.*
